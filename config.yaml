@@ -1,0 +1,50 @@
+server:
+  host: 0.0.0.0
+  port: 8081
+  reload: false
+
+llm:
+  provider: "litellm"   # litellm | yandexgpt
+  liteLLM:
+    model: yandex-chat   #alias of the proxy route in litellm.yaml
+    api_base: http://localhost:4000/v1
+    api_key:  $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+    folder_id: $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+    yandex_model: yandexgpt-lite # e.g., "yandexgpt" or "yandexgpt-lite"
+    disable_logging: false
+    temperature: 0.0
+    timeout: 30
+  yandexGPT:
+    api_key: $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+    folder_id: $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+    model: yandexgpt-lite # e.g., "yandexgpt" or "yandexgpt-lite"
+    # disable_logging: false
+    temperature: 0.0
+    timeout: 30
+
+routing:
+  mode: "precheck"      # precheck | model-call
+  defaultK: 6
+  topN: 6
+  allowRerank: "auto"   # on | off | auto
+  forceSearchKeywords:
+    ru: ["как", "почему", "ошибка", "настроить", "установить", "спецификация", "политика", "инструкция", "руководство", "траблшут", "устранение"]
+    en: ["how", "why", "error", "configure", "install", "spec", "policy", "guide", "troubleshoot", "steps", "docs"]
+
+mcp:
+  url: "http://localhost:8080/mcp"  # plug-in next step
+  toolName: "rag.search"
+  timeoutSec: 8
+  ### for future use:
+  citationDisplay: "basename"   # basename | relative | full
+  pathPrefixStrip: "/mnt/docs"  # removed when citationDisplay=relative
+  showPage: false               # whether to show page number in citation
+  # uriBase: ""
+
+limits:
+  maxToolChars: 6000
+  maxToolCallsPerTurn: 1
+
+i18n:
+  defaultLocale: ru
+  enabled: [ru, en]
