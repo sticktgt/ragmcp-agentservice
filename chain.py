@@ -178,8 +178,13 @@ def build_agent_chain(cfg: Dict[str, Any], rag_tool: Optional[Any] = None):
     def _finalize(output):
         ai = output.get("ai")
         citations = output.get("citations", [])
-        content = ai.content if hasattr(ai, "content") else (ai if isinstance(ai, str) else str(ai))
-        return {"content": content, "citations": citations}
+        content = ai.content if hasattr(ai, "content") else (
+            ai if isinstance(ai, str) else str(ai)
+        )
+        return {
+            "content": content,
+            "citations": citations,
+        }
     
     # Compose branches to carry citations through
     branch_true  = with_ctx | {"ai": main, "citations": (lambda x: x.get("citations", []))}

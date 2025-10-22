@@ -8,15 +8,15 @@ llm:
   liteLLM:
     model: yandex-chat   #alias of the proxy route in litellm.yaml
     api_base: http://localhost:4000/v1
-    api_key:  $$$$$$$$$$$$$$$$$$$$
-    folder_id: $$$$$$$$$$$$$$$$$$$$
+    api_key:  AQVN3aNJSqaBcN5YnU2UYbEJfB20crZX9XcgaI48
+    folder_id: b1g2758uu6otr3b7s64e
     yandex_model: yandexgpt-lite # e.g., "yandexgpt" or "yandexgpt-lite"
     disable_logging: false
     temperature: 0.0
     timeout: 30
   yandexGPT:
-    api_key: $$$$$$$$$$$$$$$$$$$$
-    folder_id: $$$$$$$$$$$$$$$$$$$$
+    api_key: AQVN3aNJSqaBcN5YnU2UYbEJfB20crZX9XcgaI48
+    folder_id: b1g2758uu6otr3b7s64e
     model: yandexgpt-lite # e.g., "yandexgpt" or "yandexgpt-lite"
     # disable_logging: false
     temperature: 0.0
@@ -28,11 +28,11 @@ routing:
   topN: 3
   allowRerank: "auto"   # on | off | auto
   forceSearchKeywords:
-    ru: ["как", "почему", "ошибка", "настроить", "установить", "спецификация", "политика", "инструкция", "руководство", "устранить", "документация"]
-    en: ["how", "why", "error", "configure", "install", "spec", "policy", "guide", "troubleshoot", "steps", "docs"]
+    ru: ["как","почему","ошибка","настроить","установить","спецификация","политика","инструкция","руководство","устранение","ссылки","источники","документация"]
+    en: ["how","why","error","configure","install","spec","policy","guide","troubleshoot","steps","docs","links","sources","documentation"]
   rerankKeywords:
-    ru: ["сравнение", "сравнить", "разница", "лучшее", "топ", "обзор", "против", "плюсы", "минусы", "за и против"]
-    en: ["compare", "difference", "best", "top", "overview", "vs", "versus", "pros and cons"]
+    ru: ["сравнение","сравнить","разница","лучшее","топ","обзор","против","плюсы","минусы","источники","ссылки","документация"]
+    en: ["compare","difference","best","top","overview","vs","versus","pros and cons","sources","links","documentation"]    
   escalateIfRerankTriggers: true
 
 mcp:
