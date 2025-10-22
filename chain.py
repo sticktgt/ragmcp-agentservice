@@ -62,6 +62,36 @@ def _format_snippets(items: List[dict], limit_chars: int) -> str:
         used += len(chunk)
     return "\n".join(lines)
 
+# --- add near the top of chain.py ---
+def _clip(s: str, n: int) -> str:
+    if not s:
+        return ""
+    return s if len(s) <= n else s[:n].rstrip() + "…"
+
+def _build_citations(items: List[dict], cfg: Dict[str, Any]) -> List[dict]:
+    api_cfg = (cfg.get("api") or {})
+    cit_cfg = (api_cfg.get("citations") or {})
+    include_snippet = bool(cit_cfg.get("includeSnippet", False))
+    include_score   = bool(cit_cfg.get("includeScore", False))
+    include_uri     = bool(cit_cfg.get("includeUri", False))
+    snip_limit      = int(cit_cfg.get("snippetCharsLimit", 400))
+
+    cites: List[dict] = []
+    for d in items:
+        c = {
+            "title": d.get("title"),
+            "page": d.get("page"),
+        }
+        if include_snippet:
+            c["snippet"] = _clip(d.get("snippet") or "", snip_limit)
+        if include_score:
+            c["score"] = d.get("score")
+        if include_uri:
+            c["uri"] = d.get("uri")
+        cites.append(c)
+    return cites
+
+
 def build_agent_chain(cfg: Dict[str, Any], rag_tool: Optional[Any] = None):
     llm = build_chat_model(cfg["llm"])
 
@@ -126,7 +156,7 @@ def build_agent_chain(cfg: Dict[str, Any], rag_tool: Optional[Any] = None):
             items = []
 
         input_dict["context"] = _format_snippets(items, cfg["limits"].get("maxToolChars", 6000))
-        input_dict["citations"] = [{"title": d.get("title"), "page": d.get("page")} for d in items]
+        input_dict["citations"] = _build_citations(items, cfg)
         return input_dict
 
     with_ctx = RunnableLambda(with_context_async)

@@ -8,22 +8,22 @@ llm:
   liteLLM:
     model: yandex-chat   #alias of the proxy route in litellm.yaml
     api_base: http://localhost:4000/v1
-    api_key:  $$$$$$$$$$$$$$$$$$$$$
-    folder_id: $$$$$$$$$$$$$$$$$$$$$
+    api_key:  $$$$$$$$$$$$$$$$$$$$
+    folder_id: $$$$$$$$$$$$$$$$$$$$
     yandex_model: yandexgpt-lite # e.g., "yandexgpt" or "yandexgpt-lite"
     disable_logging: false
     temperature: 0.0
     timeout: 30
   yandexGPT:
-    api_key: $$$$$$$$$$$$$$$$$$$$$
-    folder_id: $$$$$$$$$$$$$$$$$$$$$
+    api_key: $$$$$$$$$$$$$$$$$$$$
+    folder_id: $$$$$$$$$$$$$$$$$$$$
     model: yandexgpt-lite # e.g., "yandexgpt" or "yandexgpt-lite"
     # disable_logging: false
     temperature: 0.0
     timeout: 30
 
 routing:
-  mode: "precheck"      # precheck | TODO: model-call
+  mode: "precheck"      # precheck | TO:DO model-call
   defaultK: 5
   topN: 3
   allowRerank: "auto"   # on | off | auto
@@ -57,3 +57,10 @@ limits:
 i18n:
   defaultLocale: ru
   enabled: [ru, en]
+
+api:
+  citations:
+    includeSnippet: true      # return snippet text? false = only source names
+    snippetCharsLimit: 400     # trim snippet length if included
+    includeScore: true        # optionally expose score
+    includeUri: false          # for the future use
