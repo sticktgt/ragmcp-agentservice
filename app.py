@@ -7,6 +7,8 @@ from uuid import uuid4
 import traceback
 from contextlib import asynccontextmanager
 
+from langchain_mcp_adapters.client import MultiServerMCPClient
+
 from .config import CONFIG
 from .chain import build_agent_chain
 from .utils.logger import get_logger
@@ -34,23 +36,58 @@ class ChatResponse(BaseModel):
 async def lifespan(app: FastAPI):
     # Build the chain at startup
     try:
-        app.state.chain = build_agent_chain(CONFIG)
+
+        # 1) Build MCP client from config
+        mcp_cfg = (CONFIG.get("mcp") or {})
+        servers = mcp_cfg.get("servers") or {
+            "rag": {"transport": "streamable_http", "url": mcp_cfg.get("url")}
+        }
+        app.state.mcp_client = MultiServerMCPClient(servers)
+
+        # 2) Load tools and pick rag.search
+        tools = await app.state.mcp_client.get_tools()  # loads from all servers
+
+        # Log all loaded tools at debug level
+        # for idx, t in enumerate(tools):
+        #    try:
+        #         tool_name = getattr(t, "name", None) or getattr(t, "tool_name", None) or repr(t)
+        #         logger.debug("[tool %d] name=%s repr=%s", idx, tool_name, repr(t))
+        #     except Exception:
+        #         logger.debug("[tool %d] (could not repr)", idx)
+
+        rag_name = mcp_cfg.get("toolName")
+        rag_tool = next((t for t in tools if t.name == rag_name), None)
+        if not rag_tool:
+            # Soft-fail: keep running without RAG tool
+            logger.warning("MCP tool '%s' not found. Agent will run without retrieval.", rag_name)
+            app.state.rag_tool = None
+        else:
+            app.state.rag_tool = rag_tool
+
+        # 3) Build the agent chain WITH the MCP tool
+        from .chain import build_agent_chain
+        app.state.chain = build_agent_chain(CONFIG, rag_tool=app.state.rag_tool)
         app.state.startup_error = None
-        logger.info("Agent chain built successfully")
+        logger.info("Agent chain built. has_rag_tool=%s", bool(app.state.rag_tool))
+
     except Exception as exc:
         # Fail-safe: keep server up, but record startup error
         app.state.chain = None
+        app.state.rag_tool = None
+        app.state.mcp_client = None
         app.state.startup_error = exc
+        import traceback
         tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
         logger.error(f"Failed to build agent chain at startup: {exc}\n{tb}")
     yield
     # teardown if needed
     app.state.chain = None
+    app.state.rag_tool = None
+    app.state.mcp_client = None
 
 app = FastAPI(title="Agent Service", lifespan=lifespan)
 
 # --- Global exception handlers (uniform JSON errors) ---
-
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     req_id = str(uuid4())
@@ -90,14 +127,17 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     )
 
 # --- Health/readiness ---
-
 @app.get("/healthz")
 async def healthz(request: Request):
-    status = "ok" if getattr(request.app.state, "chain", None) else "degraded"
-    return {"status": status, "has_chain": bool(getattr(request.app.state, "chain", None))}
+    has_chain = bool(getattr(request.app.state, "chain", None))
+    has_rag   = bool(getattr(request.app.state, "rag_tool", None))
+    status = "ok" if has_chain else "degraded"
+    # If chain is up but rag is missing, reflect partial capability
+    if has_chain and not has_rag:
+        status = "partial"
+    return {"status": status, "has_chain": has_chain, "has_rag_tool": has_rag}
 
 # --- Main chat endpoint ---
-
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest, request: Request):
     req_id = str(uuid4())
@@ -141,10 +181,16 @@ async def chat(req: ChatRequest, request: Request):
         logger.info(f"[{req_id}] /chat start msg_len={len(user_msg)}")
         chain = request.app.state.chain  # <-- get chain from app.state
         result = await chain.ainvoke({"question": user_msg})
-        text = result.content if hasattr(result, "content") else str(result)
+        # text = result.content if hasattr(result, "content") else str(result)
+        if isinstance(result, dict) and "content" in result:
+            text = result.get("content", "")
+            citations = result.get("citations", [])
+        else:
+            text = result.content if hasattr(result, "content") else str(result)
+            citations = []
+        logger.info(f"[{req_id}] /chat done len={len(text)} citations={len(citations)}")
 
-        logger.info(f"[{req_id}] /chat done len={len(text)}")
-        return ChatResponse(content=text, citations=[], tool_calls=None, error=None)
+        return ChatResponse(content=text, citations=citations, tool_calls=None, error=None)
 
     except Exception as exc:
         tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))

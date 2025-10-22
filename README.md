@@ -1,93 +1,153 @@
-# agentservice
+# Агент-сервис (LangChain + MCP)
 
+Лёгкий HTTP‑сервис (FastAPI), оборачивающий LLM с **условным поиском** по базе знаний (RAG) через **Model Context Protocol (MCP)**. Агент решает, **когда** выполнять поиск, **как** включать переранжирование (rerank), добавляет контекст (с указанием источников) в промпт.
 
+## Ключевые возможности
 
-## Getting started
+- **Pre‑check роутер** — решает, нужен ли поиск по RAG для каждого запроса.
+- MCP‑инструмент **`rag.search`** через **langchain-mcp-adapters**.
+- Режимы переранжирования: **`on | off | auto`**; в `auto` используется эвристика (ключевые слова и др.).
+- Компактное форматирование контекста с бюджетом символов (контроль токенов).
+- **Локализация подсказок RU/EN** (автодетект по алфавиту).
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+---
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+## Архитектура (высокоуровнево)
 
 ```
-cd existing_repo
-git remote add origin https://github.com/sticktgt/ragmcp-agentservice.git
-git branch -M main
-git push -uf origin main
+Клиент → FastAPI (/chat)
+          │
+          ▼
+    Цепочка LangChain
+    ├─ Router (precheck: locale, forceSearchKeywords, rerankKeywords, escalation)
+    │    └─ need=True/False (+ locale)
+    ├─ [need=True] → MCP Tool (rag.search через langchain-mcp-adapters)
+    │        └─ normalize → [{title, snippet, score, page}]   # имя файла/отн. путь + страница
+    │        └─ _format_snippets → компактный список в лимит символов
+    └─ LLM (LiteLLM/OpenAI‑совместимый или YandexGPT)
+           └─ Итоговый ответ (+ список цитат в API)
 ```
 
-## Integrate with your tools
+**Основные модули**
+- `app.py` — FastAPI с `lifespan`, глобальные обработчики ошибок, эндпоинты `/chat`, `/healthz`.
+- `chain.py` — сборка цепочки (Router → [опц. RAG] → LLM), выбор rerank `on/off/auto`, сборка контекста.
+- `router.py` — принятие решения о поиске; учет кодировки RU/EN и ключевых слов.
+- `rag_tool.py` — нормализация MCP‑результатов в `{title, snippet, score, page}`.
+- `factory.py` — инициализация LLM (LiteLLM/OpenAI‑совместимый, либо прямой YandexGPT).
+- `config.py` — загрузка `config.yaml` + переопределения окружением `RS__...`.
 
-- [ ] [Set up project integrations](https://github.com/sticktgt/ragmcp-agentservice/settings)
+---
 
-## Collaborate with your team
+## Конвейер обработки (Pipeline)
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+1. **Маршрутизация (`need_retrieval`)**
+   - Определяется `locale` (RU/EN) по алфавиту.
+   - Если текст слишком короткий (`< 12` символов) → поиск не производится.
+   - Если найдены ключи из `routing.forceSearchKeywords[locale]` → поиск производится.
+   - Если ключи из `routing.rerankKeywords[locale]` **и** `routing.escalateIfRerankTriggers=true` → поиск производится.
 
-## Test and Deploy
+2. **Поиск (RAG), когда `need=True`**
+   - Вызов MCP‑инструмента `rag.search`.
+   - Решение **rerank** берётся из `routing.allowRerank`:
+     - `on` — всегда,
+     - `off` — никогда,
+     - `auto` — эвристика (большой `k`, сравнительные ключи `rerankKeywords`, длинный вопрос).
+   - **`top_n` передаётся только когда `rerank=true`**.
+   - Результаты нормализуются в `{title, snippet, score, page}`; `title` — имя файла/относительный путь (+ страница). URL пока не используются.
+   - `_format_snippets` собирает компактный маркированный список в лимит `limits.maxToolChars` (контроль токенов).
 
-Use the built-in continuous integration in GitLab.
+3. **LLM**
+   - Формируется системный промпт (RU/EN) + опциональный контекст‑блок со сниппетами.
+   - Возвращается ответ. **Цитаты** одновременно проксируются наружу в JSON‑поле `citations` (см. ниже).
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+---
 
-***
+## API
 
-# Editing this README
+### `POST /chat`
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+**Запрос:**
+```json
+{
+  "messages": [
+    {"role": "user", "content": "Как снизить лаг Kafka consumer? Укажите источники."}
+  ]
+}
+```
 
-## Suggestions for a good README
+**Ответ (успех):**
+```json
+{
+  "content": "Краткий ответ...",
+  "citations": [
+    {"title": "consumer_lag.md (p.3)", "page": 3},
+    {"title": "tuning.md", "page": null}
+  ],
+  "tool_calls": null,
+  "error": null
+}
+```
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+### `GET /healthz`
+```json
+{
+  "status": "ok | partial | degraded",
+  "has_chain": true,
+  "has_rag_tool": true
+}
+```
+- `partial`: сервис поднят, но MCP‑инструмент не найден (ответы будут LLM‑only).
 
-## Name
-Choose a self-explaining name for your project.
+---
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+## Конфигурация (`config.yaml`)
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+Все параметры задаются в YAML и могут быть переопределены окружением `RS__...`.
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+```yaml
+server: # Параметры запуска сервиса
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+i18n: # Параметры кодировки текста
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+llm: # Настройки соединения с LLM
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+routing: # Настройки роутинга, режим, ключевые слова...
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+limits: # Настройка лимитов
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+mcp: # Настройки соединения и правил для MCP сервиса
+```
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+### Переопределение через ENV
+Любой параметр в YAML конфигурации может быть переопределён через переменные окружения, например:
+```
+RS__LLM__PROVIDER=litellm
+RS__LLM__LITELLM__API_BASE=http://litellm:4000/v1
+RS__MCP__SERVERS__RAG__URL=http://ragretriever:8080/mcp
+RS__ROUTING__ALLOWRERANK=auto
+```
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+---
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+## Запуск
 
-## License
-For open source projects, say how it is licensed.
+### Локально
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+```bash
+python -m agentservice.main
+```
+
+Проверка:
+```bash
+curl -s http://localhost:8081/healthz
+curl -s -X POST http://localhost:8081/chat   -H "Content-Type: application/json"   -d '{"messages":[{"role":"user","content":"Как снизить лаг Kafka consumer? Укажите источники."}]}'
+```
+
+### Docker (набросок)
+- TODO
+
+---
+## TODO
+
+- 
+    

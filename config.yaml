@@ -8,32 +8,41 @@ llm:
   liteLLM:
     model: yandex-chat   #alias of the proxy route in litellm.yaml
     api_base: http://localhost:4000/v1
-    api_key:  $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
-    folder_id: $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+    api_key:  $$$$$$$$$$$$$$$$$$$$$
+    folder_id: $$$$$$$$$$$$$$$$$$$$$
     yandex_model: yandexgpt-lite # e.g., "yandexgpt" or "yandexgpt-lite"
     disable_logging: false
     temperature: 0.0
     timeout: 30
   yandexGPT:
-    api_key: $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
-    folder_id: $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+    api_key: $$$$$$$$$$$$$$$$$$$$$
+    folder_id: $$$$$$$$$$$$$$$$$$$$$
     model: yandexgpt-lite # e.g., "yandexgpt" or "yandexgpt-lite"
     # disable_logging: false
     temperature: 0.0
     timeout: 30
 
 routing:
-  mode: "precheck"      # precheck | model-call
-  defaultK: 6
-  topN: 6
+  mode: "precheck"      # precheck | TODO: model-call
+  defaultK: 5
+  topN: 3
   allowRerank: "auto"   # on | off | auto
   forceSearchKeywords:
-    ru: ["как", "почему", "ошибка", "настроить", "установить", "спецификация", "политика", "инструкция", "руководство", "траблшут", "устранение"]
+    ru: ["как", "почему", "ошибка", "настроить", "установить", "спецификация", "политика", "инструкция", "руководство", "устранить", "документация"]
     en: ["how", "why", "error", "configure", "install", "spec", "policy", "guide", "troubleshoot", "steps", "docs"]
+  rerankKeywords:
+    ru: ["сравнение", "сравнить", "разница", "лучшее", "топ", "обзор", "против", "плюсы", "минусы", "за и против"]
+    en: ["compare", "difference", "best", "top", "overview", "vs", "versus", "pros and cons"]
+  escalateIfRerankTriggers: true
 
 mcp:
-  url: "http://localhost:8080/mcp"  # plug-in next step
+  servers:
+    rag:
+      transport: "streamable_http"
+      url: "http://localhost:8080/mcp"
   toolName: "rag.search"
+  requireTool: false   # <— if true, startup will fail when the tool is missing
+
   timeoutSec: 8
   ### for future use:
   citationDisplay: "basename"   # basename | relative | full

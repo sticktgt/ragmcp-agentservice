@@ -1,7 +1,7 @@
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from langchain_core.tools import tool
-import os
+import os   
 
 class RagArgs(BaseModel):
     query: str
@@ -15,6 +15,7 @@ class RagItem(BaseModel):
     uri: Optional[str] = None
     snippet: str
     score: Optional[float] = None
+    page: Optional[int] = None
 
 def _display_title_from_prov(prov: Dict[str, Any], cfg: Dict[str, Any]) -> str:
     mode = ((cfg.get("mcp", {}) or {}).get("citationDisplay") or "basename").lower()
@@ -50,19 +51,13 @@ def normalize_mcp_hits(
     for h in hits or []:
         prov = dict(h.get("provenance") or {})
         title = _display_title_from_prov(prov, cfg)
+        page = prov.get("page_number") or prov.get("page")
         out.append(RagItem(
             snippet=h.get("text") or "",
             title=title,
-            uri=None,                   # intentionally no links
-            score=h.get("score")
+            uri=None,                   # for the future use
+            score=h.get("score"),
+            page=page,
         ))
     return out
 
-# Milestone 0.1: stub to keep the chain shape; return empty (no retrieval)
-@tool("rag.search", args_schema=RagArgs, return_direct=False)
-def rag_search_tool(query: str, k: int = 6, rerank: Optional[bool] = None,
-                    top_n: Optional[int] = None, filters: Optional[Dict[str, Any]] = None) -> List[RagItem]:
-    """
-    Placeholder RAG tool. Replace with MCP call in next milestone.
-    """
-    return []
