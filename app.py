@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict
 from langserve import add_routes
 from langchain_core.runnables import RunnableLambda
 from langchain_mcp_adapters.client import MultiServerMCPClient
+import traceback
 
 from .config import CONFIG
 from .chain import build_agent_chain
@@ -22,6 +23,36 @@ class AgentInput(BaseModel):
 class AgentOutput(BaseModel):
     content: str
     citations: Optional[List[Dict[str, Any]]] = None
+
+
+def normalize_agent_input(payload: Any) -> Dict[str, str]:
+    if hasattr(payload, "question"):
+        return {"question": (payload.question or "").strip()}
+    if isinstance(payload, dict):
+        return {"question": (payload.get("question") or "").strip()}
+    if isinstance(payload, str):
+        return {"question": payload.strip()}
+    return {"question": ""}
+
+class SafeInvoke:
+    """Callable wrapper to avoid closures; formats errors into AgentOutput shape."""
+    def __init__(self, chain, logger):
+        self.chain = chain
+        self.logger = logger
+
+    async def __call__(self, mapped: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            return await self.chain.ainvoke(mapped)
+        except Exception as e:
+            self.logger.error(
+                "agent invoke failed: %s\n%s",
+                e,
+                "".join(traceback.format_exc()),
+            )
+            return {
+                "content": "",
+                "error": {"code": "AGENT_RUNTIME_ERROR", "message": str(e)},
+            }    
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -49,22 +80,15 @@ async def lifespan(app: FastAPI):
             app.state.rag_tool = rag_tool
 
         # 3) Build the agent chain WITH the MCP tool
-        from .chain import build_agent_chain
         app.state.chain = build_agent_chain(CONFIG, rag_tool=app.state.rag_tool)
         logger.info("Agent chain built. has_rag_tool=%s", bool(app.state.rag_tool))
 
         # 4) Adapter: accept the request shape and map to chain input
-        def _normalize_agent_input(payload: Any) -> Dict[str, str]:
-            if hasattr(payload, "question"):
-                return {"question": (payload.question or "").strip()}
-            if isinstance(payload, dict):
-                return {"question": (payload.get("question") or "").strip()}
-            if isinstance(payload, str):
-                return {"question": payload.strip()}
-            return {"question": ""}
-
-        chain_adapter = RunnableLambda(_normalize_agent_input) | app.state.chain
-
+        chain_adapter = (
+            RunnableLambda(normalize_agent_input)
+            | RunnableLambda(SafeInvoke(app.state.chain, logger))
+        )
+        
         # 5) Publish LangServe routes (this replaces your custom /chat)
         # Endpoints:
         #   POST /agent/invoke       body: {"input": ChatRequest}
@@ -78,6 +102,8 @@ async def lifespan(app: FastAPI):
                 # output_type=AgentOutput,
                 # playground_type="chat",
                 playground_type="default",
+                enable_feedback_endpoint=False,
+                enable_public_trace_link_endpoint=False,
             )
             logger.info("LangServe mounted at /agent (typed I/O).")
         except TypeError:

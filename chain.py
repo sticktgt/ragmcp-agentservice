@@ -3,10 +3,10 @@ from typing import Dict, Any, List, Optional
 from langchain_core.runnables import RunnableBranch, RunnableLambda
 from langchain_core.messages import HumanMessage, SystemMessage # AIMessage
 import json
+import asyncio
 
 from .llm.factory import build_chat_model
 from .router import need_retrieval
-
 from .tools.rag_tool import normalize_mcp_hits
 from .utils.logger import get_logger
 
@@ -129,12 +129,19 @@ def build_agent_chain(cfg: Dict[str, Any], rag_tool: Optional[Any] = None):
 
                 logger.debug("rag.call args=%s", args)
 
-                out = await rag_tool.ainvoke(args)
+                # out = await rag_tool.ainvoke(args)
+                try:
+                    out = await asyncio.wait_for(rag_tool.ainvoke(args), timeout=cfg["mcp"].get("timeoutSec", 15))
+                except asyncio.TimeoutError:
+                    logger.warning("rag_tool timeout")
+                    out = []
+                except Exception as e:
+                    logger.warning("rag_tool failed: %s", e)
+                    out = []
                 # out may be:
                 # - a dict: {"results": [...]}
                 # - a list: [...] (already hits)
                 # - a JSON string (parse)
-                import json
                 hits = []
                 if isinstance(out, dict) and "results" in out:
                     hits = out["results"]
@@ -147,7 +154,8 @@ def build_agent_chain(cfg: Dict[str, Any], rag_tool: Optional[Any] = None):
                     except Exception:
                         hits = []
                 norm = normalize_mcp_hits(hits, cfg)
-                items = [i.dict() for i in norm]
+                # items = [i.dict() for i in norm]
+                items = [i.model_dump(exclude_none=True) for i in norm]
                 logger.debug("rag.results count=%d titles=%s", len(items), [d.get("title") for d in items[:5]])
             else:
                 # Fallback: no MCP tool injected
