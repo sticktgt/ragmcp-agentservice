@@ -68,9 +68,14 @@ def _clip(s: str, n: int) -> str:
         return ""
     return s if len(s) <= n else s[:n].rstrip() + "…"
 
+def _citations_enabled(cfg: Dict[str, Any]) -> bool:
+    return bool(((cfg.get("api") or {}).get("citations") or {}).get("enabled", True))
+
 def _build_citations(items: List[dict], cfg: Dict[str, Any]) -> List[dict]:
     api_cfg = (cfg.get("api") or {})
     cit_cfg = (api_cfg.get("citations") or {})
+    if cit_cfg.get("enabled", True) is False:
+        return []
     include_snippet = bool(cit_cfg.get("includeSnippet", False))
     include_score   = bool(cit_cfg.get("includeScore", False))
     include_uri     = bool(cit_cfg.get("includeUri", False))
@@ -103,9 +108,6 @@ def build_agent_chain(cfg: Dict[str, Any], rag_tool: Optional[Any] = None):
         return input_dict
     add_route_rl = RunnableLambda(add_route)
 
-    # Branch: decide retrieval
-    # router = RunnableLambda(lambda x: need_retrieval(x["question"], cfg))
-
     # 2) If retrieval is needed, call tool and add context/citations
     # ---- ASYNC context loader using the MCP-backed LangChain tool ----
     async def with_context_async(input_dict):
@@ -113,7 +115,6 @@ def build_agent_chain(cfg: Dict[str, Any], rag_tool: Optional[Any] = None):
         try:
             if rag_tool is not None:
                 k_val   = cfg["routing"].get("defaultK")
-                # top_n   = cfg["routing"].get("topN")
                 locale  = input_dict.get("route", {}).get("locale", cfg.get("i18n", {}).get("defaultLocale", "ru"))
                 rerank_flag = _resolve_rerank_flag(cfg, input_dict["question"], k_val, locale)
 
@@ -156,7 +157,10 @@ def build_agent_chain(cfg: Dict[str, Any], rag_tool: Optional[Any] = None):
             items = []
 
         input_dict["context"] = _format_snippets(items, cfg["limits"].get("maxToolChars", 6000))
-        input_dict["citations"] = _build_citations(items, cfg)
+        if _citations_enabled(cfg):
+            input_dict["citations"] = _build_citations(items, cfg)
+        else:
+            input_dict["citations"] = None  # hide entirely in API
         return input_dict
 
     with_ctx = RunnableLambda(with_context_async)
@@ -181,14 +185,19 @@ def build_agent_chain(cfg: Dict[str, Any], rag_tool: Optional[Any] = None):
         content = ai.content if hasattr(ai, "content") else (
             ai if isinstance(ai, str) else str(ai)
         )
-        return {
-            "content": content,
-            "citations": citations,
-        }
+        cit_enabled = bool(((cfg.get("api") or {}).get("citations") or {}).get("enabled", True))
+        if cit_enabled:
+            return {"content": content, "citations": citations}
+        else:
+            # return only content
+            return {"content": content}
     
     # Compose branches to carry citations through
     branch_true  = with_ctx | {"ai": main, "citations": (lambda x: x.get("citations", []))}
-    branch_false = {"ai": main, "citations": (lambda x: [])}
+    branch_false = {
+        "ai": main,
+        "citations": (lambda x: None) if not _citations_enabled(cfg) else (lambda x: [])
+    }
 
     chain = (
         {"question": lambda x: x["question"]}

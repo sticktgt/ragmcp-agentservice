@@ -1,21 +1,23 @@
-# Агент-сервис (LangChain + MCP)
+# Агент-сервис (LangChain + MCP, LangServe)
 
-Лёгкий HTTP‑сервис (FastAPI), оборачивающий LLM с **условным поиском** по базе знаний (RAG) через **Model Context Protocol (MCP)**. Агент решает, **когда** выполнять поиск, **как** включать переранжирование (rerank), добавляет контекст (с указанием источников) в промпт.
+Лёгкий HTTP‑сервис на базе **LangServe (FastAPI)**, оборачивающий LLM с **условным поиском** по базе знаний (RAG) через **Model Context Protocol (MCP)**. Агент решает, **когда** выполнять поиск, **как** включать переранжирование (rerank), добавляет контекст (с указанием источников) в промпт. Возврат источников (цитат) настраивается в конфигурации.
 
 ## Ключевые возможности
 
 - **Pre‑check роутер** — решает, нужен ли поиск по RAG для каждого запроса.
 - MCP‑инструмент **`rag.search`** через **langchain-mcp-adapters**.
 - Режимы переранжирования: **`on | off | auto`**; в `auto` используется эвристика (ключевые слова и др.).
-- Компактное форматирование контекста с бюджетом символов (контроль токенов).
+- Компактное форматирование контекста с бюджетом символов (контроль токенов).]
 - **Локализация подсказок RU/EN** (автодетект по алфавиту).
+- LangServe‑роуты + playground, **/healthz** для проверки готовности.
+- Конфиг‑переключатели для **политики цитирования** (в том числе полное отключение цитат).
 
 ---
 
 ## Архитектура (высокоуровнево)
 
 ```
-Клиент → FastAPI (/chat)
+Клиент → LangServe (FastAPI) (/agent/invoke)
           │
           ▼
     Цепочка LangChain
@@ -25,16 +27,16 @@
     │        └─ normalize → [{title, snippet, score, page}]   # имя файла/отн. путь + страница
     │        └─ _format_snippets → компактный список в лимит символов
     └─ LLM (LiteLLM/OpenAI‑совместимый или YandexGPT)
-           └─ Итоговый ответ (+ список цитат в API)
+           └─ Итоговый ответ (+ опц. список цитат в API)
 ```
 
 **Основные модули**
-- `app.py` — FastAPI с `lifespan`, глобальные обработчики ошибок, эндпоинты `/chat`, `/healthz`.
-- `chain.py` — сборка цепочки (Router → [опц. RAG] → LLM), выбор rerank `on/off/auto`, сборка контекста.
-- `router.py` — принятие решения о поиске; учет кодировки RU/EN и ключевых слов.
+- `app.py` — LangServe‑поднятие цепочки на FastAPI, `/agent`, `/agent/playground`, `/healthz`.
+- `chain.py` — сборка цепочки (Router → [MCP] → LLM), контекст, политика rerank и выдача ответа.
+- `router.py` — решение о поиске; локаль RU/EN; ключевые слова.
 - `rag_tool.py` — нормализация MCP‑результатов в `{title, snippet, score, page}`.
-- `factory.py` — инициализация LLM (LiteLLM/OpenAI‑совместимый, либо прямой YandexGPT).
-- `config.py` — загрузка `config.yaml` + переопределения окружением `RS__...`.
+- `llm/factory.py` — инициализация LLM (LiteLLM/OpenAI‑совместимый, либо YandexGPT).
+- `config.py` — загрузка `config.yaml` + ENV‑переопределения `RS__...`.
 
 ---
 
@@ -64,39 +66,58 @@
 
 ## API
 
-### `POST /chat`
+### `POST /agent/invoke`
 
 **Запрос:**
 ```json
 {
-  "messages": [
-    {"role": "user", "content": "Как снизить лаг Kafka consumer? Укажите источники."}
-  ]
+    "input": {
+        "question": "Как снизить лаг Kafka consumer? Укажите источники."
+    }
 }
 ```
 
-**Ответ (успех):**
+**Ответ (успех, с цитатами):**
 ```json
 {
-  "content": "Краткий ответ...",
-  "citations": [
-    {"title": "consumer_lag.md (p.3)", "page": 3},
-    {"title": "tuning.md", "page": null}
-  ],
-  "tool_calls": null,
-  "error": null
+    "output": {
+        "content": "Текст ответа от LLM",
+        "citations": [
+            {
+                "title": "имя_файла.pdf",
+                "page": 0,
+                "snippet": "Текст цитаты...",
+                "score": 0.14167605406794226
+            }
+        ]
+    },
+    "metadata": {
+        "run_id": "e41b117c-0cf9-4bdc-840f-326161c4da5e",
+        "feedback_tokens": []
+    }
 }
 ```
-
+**Ответ (успех, без цитат):**
+```json
+{
+    "output": {
+        "content": "Текст ответа от LLM"
+    },
+    "metadata": {
+        "run_id": "5e7e8c7e-ebc8-448b-9699-fcbfcb676cc6",
+        "feedback_tokens": []
+    }
+}
+```
 ### `GET /healthz`
 ```json
 {
-  "status": "ok | partial | degraded",
-  "has_chain": true,
-  "has_rag_tool": true
-}
+    "status":"ok",
+    "has_chain":true,
+    "has_rag_tool":true,
+    "startup_error":null}
 ```
-- `partial`: сервис поднят, но MCP‑инструмент не найден (ответы будут LLM‑only).
+- `has_rag_tool`: подключен ли сервис RAG.
 
 ---
 
@@ -124,6 +145,7 @@ api: # Настройки API
 ### Переопределение через ENV
 Любой параметр в YAML конфигурации может быть переопределён через переменные окружения, например:
 ```
+RS__API__CITATIONS__ENABLED=false
 RS__LLM__PROVIDER=litellm
 RS__LLM__LITELLM__API_BASE=http://litellm:4000/v1
 RS__MCP__SERVERS__RAG__URL=http://ragretriever:8080/mcp
@@ -143,11 +165,18 @@ python -m agentservice.main
 Проверка:
 ```bash
 curl -s http://localhost:8081/healthz
-curl -s -X POST http://localhost:8081/chat   -H "Content-Type: application/json"   -d '{"messages":[{"role":"user","content":"Как снизить лаг Kafka consumer? Укажите источники."}]}'
+curl -s http://localhost:8081/agent/invoke   -H "Content-Type: application/json"   -d '{"input": {"question": "Как снизить лаг Kafka consumer? Укажите источники."}}'
 ```
 
 ### Docker (набросок)
 - TODO
+---
+
+## Дополнительно
+
+**LangServe Playground**
+
+http://localhost:8081/agent/playground/
 
 ---
 ## TODO

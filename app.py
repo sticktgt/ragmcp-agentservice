@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from typing import List, Optional, Dict, Any
 
 from fastapi import FastAPI, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from langserve import add_routes
 from langchain_core.runnables import RunnableLambda
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -75,8 +75,9 @@ async def lifespan(app: FastAPI):
                 chain_adapter,
                 path="/agent",
                 input_type=AgentInput,
-                output_type=AgentOutput,
-                playground_type="chat",
+                # output_type=AgentOutput,
+                # playground_type="chat",
+                playground_type="default",
             )
             logger.info("LangServe mounted at /agent (typed I/O).")
         except TypeError:

@@ -8,15 +8,15 @@ llm:
   liteLLM:
     model: yandex-chat   #alias of the proxy route in litellm.yaml
     api_base: http://localhost:4000/v1
-    api_key:  AQVN3aNJSqaBcN5YnU2UYbEJfB20crZX9XcgaI48
-    folder_id: b1g2758uu6otr3b7s64e
+    api_key:  $$$$$$$$$$$$$$$$$$$$$$
+    folder_id: $$$$$$$$$$$$$$$$$$$$$$
     yandex_model: yandexgpt-lite # e.g., "yandexgpt" or "yandexgpt-lite"
     disable_logging: false
     temperature: 0.0
     timeout: 30
   yandexGPT:
-    api_key: AQVN3aNJSqaBcN5YnU2UYbEJfB20crZX9XcgaI48
-    folder_id: b1g2758uu6otr3b7s64e
+    api_key: $$$$$$$$$$$$$$$$$$$$$$
+    folder_id: $$$$$$$$$$$$$$$$$$$$$$
     model: yandexgpt-lite # e.g., "yandexgpt" or "yandexgpt-lite"
     # disable_logging: false
     temperature: 0.0
@@ -60,6 +60,7 @@ i18n:
 
 api:
   citations:
+    enabled: false
     includeSnippet: true      # return snippet text? false = only source names
     snippetCharsLimit: 400     # trim snippet length if included
     includeScore: true        # optionally expose score
