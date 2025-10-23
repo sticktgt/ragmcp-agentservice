@@ -168,8 +168,10 @@ curl -s http://localhost:8081/healthz
 curl -s http://localhost:8081/agent/invoke   -H "Content-Type: application/json"   -d '{"input": {"question": "Как снизить лаг Kafka consumer? Укажите источники."}}'
 ```
 
-### Docker (набросок)
-- TODO
+### Docker (пример)
+```bash
+docker run --rm -it -p 8081:8081 --add-host=host.docker.internal:host-gateway -e "RS__LLM__LITELLM__API_BASE=http://host.docker.internal:4000/v1" -e "RS__LLM__LITELLM__API_KEY=****************" -e "RS__LLM__LITELLM__FOLDER_ID=****************" -e "RS__MCP__SERVERS__RAG__URL=http://host.docker.internal:8080/mcp" -e "RS__API__CITATIONS__ENABLED=false" agentservice:latest
+```
 ---
 
 ## Дополнительно
