@@ -12,6 +12,7 @@ import traceback
 
 from .config import CONFIG
 from .chain import build_agent_chain
+from .chain_graph import build_agent_graph # graph-based chain
 from .utils.logger import get_logger
 
 logger = get_logger()
@@ -33,6 +34,14 @@ def normalize_agent_input(payload: Any) -> Dict[str, str]:
     if isinstance(payload, str):
         return {"question": payload.strip()}
     return {"question": ""}
+
+def _select_api_output(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Return only the public fields; omit citations if None/empty."""
+    res = {"content": state.get("content", "")}
+    citations = state.get("citations", None)
+    if citations:  # add only when not None/empty
+        res["citations"] = citations
+    return res
 
 class SafeInvoke:
     """Callable wrapper to avoid closures; formats errors into AgentOutput shape."""
@@ -80,7 +89,9 @@ async def lifespan(app: FastAPI):
             app.state.rag_tool = rag_tool
 
         # 3) Build the agent chain WITH the MCP tool
-        app.state.chain = build_agent_chain(CONFIG, rag_tool=app.state.rag_tool)
+        #app.state.chain = build_agent_chain(CONFIG, rag_tool=app.state.rag_tool)
+        graph = build_agent_graph(CONFIG, rag_tool=app.state.rag_tool) # graph-based
+        app.state.chain = graph | RunnableLambda(_select_api_output) # graph + output adapter
         logger.info("Agent chain built. has_rag_tool=%s", bool(app.state.rag_tool))
 
         # 4) Adapter: accept the request shape and map to chain input
