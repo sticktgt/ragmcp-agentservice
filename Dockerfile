@@ -9,30 +9,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates tini \ 
  && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+WORKDIR /app/agentservice
 
-FROM base AS deps
-COPY requirements.txt ./
-RUN python -m pip install --upgrade pip \ 
-  && pip install --no-cache-dir -r requirements.txt
+# Install deps
+COPY requirements.txt ./requirements.txt
+RUN python -m pip install --upgrade pip \
+ && pip install --no-cache-dir -r requirements.txt
 
-FROM base AS runtime
+COPY . .
+
+# Non-root
 RUN adduser --disabled-password --gecos "" appuser
 USER appuser
-WORKDIR /app
 
-COPY --from=deps /usr/local/lib/python3.12 /usr/local/lib/python3.12
-COPY --from=deps /usr/local/bin /usr/local/bin
+ENV RS__SERVER__HOST=0.0.0.0
+ENV RS__SERVER__PORT=2024
+EXPOSE 2024
 
-COPY . ./agentservice
-# COPY config.yaml ./config.yaml
-# COPY entrypoint.sh ./entrypoint.sh
-
-EXPOSE 8081
-
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD curl -fsS http://localhost:8081/healthz || exit 1
+# Healthcheck against LangGraph server docs endpoint
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -fsS "http://127.0.0.1:${RS__SERVER__PORT}/docs" >/dev/null || exit 1
 
 ENTRYPOINT ["/usr/bin/tini","--"]
-# CMD ["bash","/app/entrypoint.sh"]
-CMD ["python", "-m", "agentservice.main"]
+CMD ["sh","-lc","langgraph dev --host ${RS__SERVER__HOST:-0.0.0.0} --port ${RS__SERVER__PORT:-2024}"]

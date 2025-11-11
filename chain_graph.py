@@ -6,10 +6,11 @@ import asyncio
 from langgraph.graph import StateGraph, START, END
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from .router import need_retrieval
-from .tools.rag_tool import normalize_mcp_hits
-from .llm.factory import build_chat_model
-from .utils.logger import get_logger
+from router import need_retrieval
+from tools.rag_tool import normalize_mcp_hits
+from llm.factory import build_chat_model
+from utils.logger import get_logger
+from mcp_lazy import get_mcp_tool
 
 logger = get_logger()
 
@@ -22,6 +23,28 @@ CONTEXT_FMT = {
   "en": "Use these snippets as context:\n{context}\nWhen citing, prefer the URI if available.",
 }
 
+# ---------- Graph builder ----------
+def build_agent_graph_obj(cfg, rag_tool=None):
+    g = StateGraph(AgentState)
+    g.add_node("route",    RouteNode(cfg))
+    g.add_node("search",   SearchNode(cfg, rag_tool))
+    g.add_node("generate", GenerateNode(cfg))
+    g.add_node("finalize", FinalizeNode(cfg))
+
+    g.add_edge(START, "route")
+
+    def _branch(state: AgentState) -> str:
+        need = bool((state.get("route") or {}).get("need"))
+        return "search" if need else "generate"
+
+    g.add_conditional_edges("route", _branch, {"search": "search", "generate": "generate"})
+    g.add_edge("search", "generate")
+    g.add_edge("generate", "finalize")
+    g.add_edge("finalize", END)
+
+    return g
+
+# Helper to format snippets 
 def _format_snippets(items: List[dict], limit_chars: int) -> str:
     if not items or limit_chars <= 0:
         return ""
@@ -39,6 +62,7 @@ def _format_snippets(items: List[dict], limit_chars: int) -> str:
 def _citations_enabled(cfg: Dict[str, Any]) -> bool:
     return bool(((cfg.get("api") or {}).get("citations") or {}).get("enabled", True))
 
+# Returns list of citation dicts based on config
 def _build_citations(items: List[dict], cfg: Dict[str, Any]) -> List[dict]:
     cit_cfg = (cfg.get("api", {}).get("citations") or {})
     if cit_cfg.get("enabled", True) is False:
@@ -61,6 +85,7 @@ def _build_citations(items: List[dict], cfg: Dict[str, Any]) -> List[dict]:
         out.append(c)
     return out
 
+# Helper to decide rerank flag based on config and question
 def _resolve_rerank_flag(cfg: Dict[str, Any], question: str, k: int, locale: str) -> bool:
     mode = (cfg["routing"].get("allowRerank", "auto") or "auto").strip().lower()
     if mode in ("on", "off"):
@@ -106,8 +131,12 @@ class SearchNode:
 
     async def __call__(self, state: AgentState) -> AgentState:
         state["hits"], state["context"], state["citations"] = [], "", None
+
+        # lazy MCP tool init if missing
         if not self.tool:
-            return state
+            self.tool = await get_mcp_tool(self.cfg)
+            if not self.tool:
+                return state
 
         args = {"query": state["question"], "k": state["k"], "rerank": state["rerank"]}
         if state["rerank"]:
@@ -174,22 +203,4 @@ class FinalizeNode:
 
 # ---------- Public builder ----------
 def build_agent_graph(cfg: Dict[str, Any], rag_tool: Any | None) -> Any:
-    g = StateGraph(AgentState)
-    g.add_node("route",    RouteNode(cfg))
-    g.add_node("search",   SearchNode(cfg, rag_tool))
-    g.add_node("generate", GenerateNode(cfg))
-    g.add_node("finalize", FinalizeNode(cfg))
-
-    g.add_edge(START, "route")
-
-    def _branch(state: AgentState) -> str:
-        need = bool((state.get("route") or {}).get("need"))
-        return "search" if need else "generate"
-
-    g.add_conditional_edges("route", _branch, {"search": "search", "generate": "generate"})
-    g.add_edge("search", "generate")
-    g.add_edge("generate", "finalize")
-    g.add_edge("finalize", END)
-
-    # Returns a Runnable (works with LangServe add_routes)
-    return g.compile()
+    return build_agent_graph_obj(cfg, rag_tool).compile()

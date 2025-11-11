@@ -1,0 +1,17 @@
+{
+  "dependencies": [
+    ".",
+    "langgraph",
+    "langgraph-cli",
+    "langgraph-sdk",
+    "langchain",
+    "langchain-openai",
+    "langchain-community",
+    "langchain-mcp-adapters"
+  ],
+  "graphs": {
+    "agent": "./graph_entry.py:make_graph"
+  },
+  "http": { "app": "./webapp.py:app" },
+  "env": "./.env"
+}

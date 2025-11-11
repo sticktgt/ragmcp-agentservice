@@ -1,6 +1,6 @@
 server:
   host: 0.0.0.0
-  port: 8081
+  port: 2024
   reload: false
 
 llm:
@@ -60,8 +60,8 @@ i18n:
 
 api:
   citations:
-    enabled: true            # enable citations in API output 
+    enabled: true
     includeSnippet: true      # return snippet text? false = only source names
     snippetCharsLimit: 400     # trim snippet length if included
-    includeScore: true        # optionally expose score
+    includeScore: false        # optionally expose score
     includeUri: false          # for the future use

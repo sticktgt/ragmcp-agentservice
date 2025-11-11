@@ -1,125 +1,82 @@
-# Агент-сервис (LangChain + MCP, LangServe)
+# Агент-сервис (LangChain + MCP, **LangGraph API Server**)
 
-Лёгкий HTTP‑сервис на базе **LangServe (FastAPI)**, оборачивающий LLM с **условным поиском** по базе знаний (RAG) через **Model Context Protocol (MCP)**. Агент решает, **когда** выполнять поиск, **как** включать переранжирование (rerank), добавляет контекст (с указанием источников) в промпт. Возврат источников (цитат) настраивается в конфигурации.
+Лёгкий HTTP‑серЛёгкий агент для вопросов/ответов с **условным RAG-поиском** по базе знаний через **Model Context Protocol (MCP)**.  
+Агент решает, **когда** выполнять поиск, **как** включать переранжирование (rerank), добавляет контекст (с указанием источников) в промпт. Возврат источников (цитат) настраивается в конфигурации.
+Текущая реализация использует **LangGraph API Server**. Для простого синхронного HTTP добавлен собственный маршрут `/invoke` поверх сервера LangGraph.
 
 ## Ключевые возможности
 
-- **Pre‑check роутер** — решает, нужен ли поиск по RAG для каждого запроса.
-- MCP‑инструмент **`rag.search`** через **langchain-mcp-adapters**.
-- Режимы переранжирования: **`on | off | auto`**; в `auto` используется эвристика (ключевые слова и др.).
-- Компактное форматирование контекста с бюджетом символов (контроль токенов).]
-- **Локализация подсказок RU/EN** (автодетект по алфавиту).
-- LangServe‑роуты + playground, **/healthz** для проверки готовности.
-- Конфиг‑переключатели для **политики цитирования** (в том числе полное отключение цитат).
+- **LangGraph**: граф из узлов (Route → Search[RAG/MCP] → Generate[LLM] → Finalize), управляет ветвлением и состоянием.
+- **MCP через LangChain**: `langchain-mcp-adapters` + `MultiServerMCPClient` с транспортом `streamable_http`.
+- **Условный поиск**: Router решает, выполнять ли RAG (по ключевым словам/длине/настройке).
+- **Переранжирование**: режимы `on | off | auto`; параметр `top_n` добавляется **только** при `rerank=true`.
+- **Цитаты (источники)**: настраиваются в `config.yaml` (включение/выключение, сниппеты, лимит символов, score...
+- **Простой синхронный HTTP**: `/invoke` (возвращает финальный JSON без стриминга).
+- **Стриминг**: стандартные эндпоинты LangGraph (`/runs/stream`, `/runs`, `/messages`).
 
 ---
 
 ## Архитектура (высокоуровнево)
 
 ```
-Клиент → LangServe (FastAPI) (/agent/invoke)
-          │
-          ▼
-    Цепочка LangChain
-    ├─ Router (precheck: locale, forceSearchKeywords, rerankKeywords, escalation)
-    │    └─ need=True/False (+ locale)
-    ├─ [need=True] → MCP Tool (rag.search через langchain-mcp-adapters)
-    │        └─ normalize → [{title, snippet, score, page}]   # имя файла/отн. путь + страница
-    │        └─ _format_snippets → компактный список в лимит символов
-    └─ LLM (LiteLLM/OpenAI‑совместимый или YandexGPT)
-           └─ Итоговый ответ (+ опц. список цитат в API)
+
+Клиент ──(HTTP)──→ LangGraph API (+ кастомный FastAPI app)
+├─ /invoke ← синхронный вызов graph.ainvoke() → финальный JSON
+├─ /runs, /runs/stream, /messages (встроенные эндпоинты)
+└─ /docs (OpenAPI)
+
+Граф (StateGraph, LangGraph)
+├─ RouteNode → решает нужен ли поиск, режим поиска
+├─ SearchNode → если нужно - вызов MCP инструмента (rag.search)
+├─ GenerateNode→ сбор промпта (RU/EN) + контекста; вызов LLM
+└─ FinalizeNode→ формирует ответ и список citations (если включено)
+
 ```
 
 **Основные модули**
-- `app.py` — LangServe‑поднятие цепочки на FastAPI, `/agent`, `/agent/playground`, `/healthz`.
-- `chain.py` — сборка цепочки (Router → [MCP] → LLM), контекст, политика rerank и выдача ответа.
-- `router.py` — решение о поиске; локаль RU/EN; ключевые слова.
-- `rag_tool.py` — нормализация MCP‑результатов в `{title, snippet, score, page}`.
-- `llm/factory.py` — инициализация LLM (LiteLLM/OpenAI‑совместимый, либо YandexGPT).
-- `config.py` — загрузка `config.yaml` + ENV‑переопределения `RS__...`.
-
----
-
-## Конвейер обработки (Pipeline)
-
-1. **Маршрутизация (`need_retrieval`)**
-   - Определяется `locale` (RU/EN) по алфавиту.
-   - Если текст слишком короткий (`< 12` символов) → поиск не производится.
-   - Если найдены ключи из `routing.forceSearchKeywords[locale]` → поиск производится.
-   - Если ключи из `routing.rerankKeywords[locale]` **и** `routing.escalateIfRerankTriggers=true` → поиск производится.
-
-2. **Поиск (RAG), когда `need=True`**
-   - Вызов MCP‑инструмента `rag.search`.
-   - Решение **rerank** берётся из `routing.allowRerank`:
-     - `on` — всегда,
-     - `off` — никогда,
-     - `auto` — эвристика (большой `k`, сравнительные ключи `rerankKeywords`, длинный вопрос).
-   - **`top_n` передаётся только когда `rerank=true`**.
-   - Результаты нормализуются в `{title, snippet, score, page}`; `title` — имя файла/относительный путь (+ страница). URL пока не используются.
-   - `_format_snippets` собирает компактный маркированный список в лимит `limits.maxToolChars` (контроль токенов).
-
-3. **LLM**
-   - Формируется системный промпт (RU/EN) + опциональный контекст‑блок со сниппетами.
-   - Возвращается ответ. **Цитаты** одновременно проксируются наружу в JSON‑поле `citations` (см. ниже).
+- `chain_graph.py` — описание графа (узлы/переходы), сборка `StateGraph` и компиляция.
+- `router.py` — определение параметров вызова RAG.
+- `mcp_lazy.py` — создание клиента `MultiServerMCPClient` и выбор инструмента (`toolName`).
+- `tools/rag_tool.py` — нормализация результатов MCP (title/snippet/score/page/uri) и формат контекста.
+- `llm/factory.py` — фабрика LLM (LiteLLM/OpenAI-совместимые/YandexGPT).
+- `config.py` — загрузка `config.yaml` + ENV (`RS__...`) и доступ к параметрам.
+- `graph_entry.py` — экспорт **фабрики графа** `make_graph` (некомпилированный Graph) для LangGraph.
+- `webapp.py` — FastAPI-приложение, публикующее `/invoke` (синхронный JSON без стриминга).
+- `langgraph.json` — конфигурация сервера LangGraph: где взять граф и веб-приложение.
 
 ---
 
 ## API
 
-### `POST /agent/invoke`
+### `POST /invoke`
 
 **Запрос:**
 ```json
 {
-    "input": {
-        "question": "Как снизить лаг Kafka consumer? Укажите источники."
-    }
+    "question": "Как снизить лаг Kafka consumer? Укажите источники."
 }
 ```
 
 **Ответ (успех, с цитатами):**
 ```json
 {
-    "output": {
-        "content": "Текст ответа от LLM",
-        "citations": [
-            {
-                "title": "имя_файла.pdf",
-                "page": 0,
-                "snippet": "Текст цитаты...",
-                "score": 0.14167605406794226
-            }
-        ]
-    },
-    "metadata": {
-        "run_id": "e41b117c-0cf9-4bdc-840f-326161c4da5e",
-        "feedback_tokens": []
-    }
+    "content": "Текст ответа от LLM",
+    "citations": [
+        {
+            "title": "имя_файла.pdf",
+            "page": 0,
+            "snippet": "Текст цитаты...",
+            "score": 0.14167605406794226
+        }
+    ]
 }
 ```
 **Ответ (успех, без цитат):**
 ```json
 {
-    "output": {
-        "content": "Текст ответа от LLM"
-    },
-    "metadata": {
-        "run_id": "5e7e8c7e-ebc8-448b-9699-fcbfcb676cc6",
-        "feedback_tokens": []
-    }
+    "content": "Текст ответа от LLM"
 }
 ```
-### `GET /healthz`
-```json
-{
-    "status":"ok",
-    "has_chain":true,
-    "has_rag_tool":true,
-    "startup_error":null}
-```
-- `has_rag_tool`: подключен ли сервис RAG.
-
----
 
 ## Конфигурация (`config.yaml`)
 
@@ -159,29 +116,38 @@ RS__ROUTING__ALLOWRERANK=auto
 ### Локально
 
 ```bash
-python -m agentservice.main
+langgraph dev
 ```
 
 Проверка:
 ```bash
-curl -s http://localhost:8081/healthz
-curl -s http://localhost:8081/agent/invoke   -H "Content-Type: application/json"   -d '{"input": {"question": "Как снизить лаг Kafka consumer? Укажите источники."}}'
+curl -s -X POST http://localhost:2024/invoke   -H "Content-Type: application/json"   -d '{"question":"Как снизить лаг Kafka consumer? Укажите источники."'
+```
+
+```bash
+curl -s --request POST \
+  --url "http://localhost:2024/runs/stream" \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "assistant_id": "agent",
+    "input": { "question": "Как снизить лаг Kafka consumer? Укажите источники." },
+    "stream_mode": "messages-tuple"
+  }'
 ```
 
 ### Docker (пример)
 ```bash
-docker run --rm -it -p 8081:8081 --add-host=host.docker.internal:host-gateway -e "RS__LLM__LITELLM__API_BASE=http://host.docker.internal:4000/v1" -e "RS__LLM__LITELLM__API_KEY=****************" -e "RS__LLM__LITELLM__FOLDER_ID=****************" -e "RS__MCP__SERVERS__RAG__URL=http://host.docker.internal:8080/mcp" -e "RS__API__CITATIONS__ENABLED=false" agentservice:latest
+docker run --rm -it -p 2024:2024 --add-host=host.docker.internal:host-gateway -e "RS__LLM__LITELLM__API_BASE=http://host.docker.internal:4000/v1" -e "RS__LLM__LITELLM__API_KEY=****************" -e "RS__LLM__LITELLM__FOLDER_ID=****************" -e "RS__MCP__SERVERS__RAG__URL=http://host.docker.internal:8080/mcp" -e "RS__API__CITATIONS__ENABLED=false" agentservice:latest
 ```
 ---
 
 ## Дополнительно
 
-**LangServe Playground**
-
-http://localhost:8081/agent/playground/
+GET /docs — OpenAPI от LangGraph.
 
 ---
 ## TODO
-
+Добавить логирование в LangGraph
+...
 - 
     

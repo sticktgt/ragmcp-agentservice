@@ -1,6 +1,6 @@
 # agent_service/router.py
 from typing import Dict, Any
-from .utils.logger import get_logger
+from utils.logger import get_logger
 logger = get_logger()
 
 def _detect_locale(text: str, default="ru") -> str:
