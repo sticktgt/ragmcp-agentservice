@@ -1,10 +1,10 @@
-fastapi>=0.115.0
+fastapi==0.115.14
 # uvicorn>=0.29.0
 
 # --- Core LangChain stack ---
-langchain>=0.3.26,<0.4.0
-langchain-community>=0.3.27
-langchain-openai>=0.3.28
+langchain==0.3.27
+langchain-community==0.3.27
+langchain-openai==0.3.27
 #langserve>=0.3.3
 
 # MCP via LangChain
@@ -12,13 +12,13 @@ langchain-mcp-adapters>=0.1.11
 mcp>=1.12.4
 
 # LangGraph (server + SDK for local dev)
-langgraph>=1.0.1
-langgraph-cli[inmem]>=0.4.7
-langgraph-sdk>=0.2.9
+langgraph==1.0.1
+langgraph-cli[inmem]==0.4.7
+langgraph-sdk==0.2.9
 
 # Config & typing
-pydantic>=2.11.7
-pyyaml>=6.0.2
+pydantic==2.11.7
+pyyaml==6.0.2
 
 # Yandex SDK
 protobuf>=5.29.1,<6.0.0
@@ -26,3 +26,4 @@ yandexcloud==0.366.0
 
 # httpx>=0.28.1
 # openai>=1.106.1
+python-a2a==0.5.10

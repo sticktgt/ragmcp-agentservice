@@ -195,6 +195,10 @@ class FinalizeNode:
         self.cfg = cfg
 
     def __call__(self, state: AgentState) -> AgentState:
+        # If any upstream node marked an error, return only the error payload
+        if state.get("error"):
+            return {"error": state["error"]}
+
         res: AgentState = {"content": state.get("content", "")}
         # Only include citations if enabled + present
         if _citations_enabled(self.cfg) and state.get("citations") is not None:
