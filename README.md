@@ -80,7 +80,7 @@
 }
 ```
 
-v
+### `POST /runs/stream порт 2024`
 
 **Запрос LangGraph API:**
 ```bash
@@ -202,7 +202,7 @@ id: 1763464822825-0
 }
 ```
 
-### `POST / порт 2024`/a2a/tasks/send
+### `POST /a2a/tasks/send/ порт 2024`
 
 **Запрос JSON-RPC style:**
 ```json
@@ -376,7 +376,7 @@ curl -s http://localhost:5050/.well-known/agent-card.json | jq .
 ```
 ---
 ## TODO
+
 Добавить логирование в LangGraph
-...
-- 
+  
     
