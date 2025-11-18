@@ -62,6 +62,7 @@ i18n:
   enabled: [ru, en]
 
 api:
+  use_google_a2a: true
   citations:
     enabled: true
     includeSnippet: true      # return snippet text? false = only source names

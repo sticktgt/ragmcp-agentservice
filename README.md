@@ -50,9 +50,9 @@
 
 ## API
 
-### `POST /invoke`
+### `POST /invoke порт 2024`
 
-**Запрос:**
+**Запрос порт**
 ```json
 {
     "question": "Как снизить лаг Kafka consumer? Укажите источники."
@@ -80,7 +80,38 @@
 }
 ```
 
-**Запрос A2A:**
+v
+
+**Запрос LangGraph API:**
+```bash
+curl -s --request POST \
+  --url "http://localhost:2024/runs/stream" \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "assistant_id": "agent",
+    "input": { "question": "Как снизить лаг Kafka consumer? Укажите источники." },
+    "stream_mode": "messages-tuple"
+  }'
+```
+
+**Ответ LangGraph API:**
+```json
+event: metadata
+data: {"run_id":"019a96b1-b161-712f-af32-2599443182b5","attempt":1}
+id: 1763464819917-0
+
+event: messages
+data: [{"content":"К сожалению, в предоставленном контексте нет информации, которая помогла бы ответить на ваш вопрос о снижении лага Kafka consumer.","additional_kwargs":{},"response_metadata":{},"type":"AIMessageChunk","name":null,"id":"run--0a6119f7-9d7f-4ceb-8d41-bd279a060d84","example":false,"tool_calls":[],"invalid_tool_calls":[],"usage_metadata":null,"tool_call_chunks":[]},{"created_by":"system","langgraph_auth_user_id":"","langgraph_request_id":"b3f08a9c-ab7c-478b-ad49-15dac2a86b71","run_id":"019a96b1-b161-712f-af32-2599443182b5","thread_id":"ac6d40d6-3f17-4f9e-aa76-c5a004eee514","graph_id":"agent","assistant_id":"fe096781-5601-53d2-b2f6-0d3403f7e9ca","user_id":"","run_attempt":1,"langgraph_version":"1.0.1","langgraph_api_version":"0.4.28","langgraph_plan":"developer","langgraph_host":"self-hosted","langgraph_api_url":"http://0.0.0.0:2024","langgraph_step":3,"langgraph_node":"generate","langgraph_triggers":["branch:to:generate"],"langgraph_path":["__pregel_pull","generate"],"langgraph_checkpoint_ns":"generate:795fc25b-5182-aad7-4783-e4fbe7274607","checkpoint_ns":"generate:795fc25b-5182-aad7-4783-e4fbe7274607","ls_provider":"openai","ls_model_name":"yandex-chat","ls_model_type":"chat","ls_temperature":0.0}]
+id: 1763464822748-0
+
+event: messages
+data: [{"content":"","additional_kwargs":{},"response_metadata":{"finish_reason":"stop","model_name":"chat"},"type":"AIMessageChunk","name":null,"id":"run--0a6119f7-9d7f-4ceb-8d41-bd279a060d84","example":false,"tool_calls":[],"invalid_tool_calls":[],"usage_metadata":null,"tool_call_chunks":[]},{"created_by":"system","langgraph_auth_user_id":"","langgraph_request_id":"b3f08a9c-ab7c-478b-ad49-15dac2a86b71","run_id":"019a96b1-b161-712f-af32-2599443182b5","thread_id":"ac6d40d6-3f17-4f9e-aa76-c5a004eee514","graph_id":"agent","assistant_id":"fe096781-5601-53d2-b2f6-0d3403f7e9ca","user_id":"","run_attempt":1,"langgraph_version":"1.0.1","langgraph_api_version":"0.4.28","langgraph_plan":"developer","langgraph_host":"self-hosted","langgraph_api_url":"http://0.0.0.0:2024","langgraph_step":3,"langgraph_node":"generate","langgraph_triggers":["branch:to:generate"],"langgraph_path":["__pregel_pull","generate"],"langgraph_checkpoint_ns":"generate:795fc25b-5182-aad7-4783-e4fbe7274607","checkpoint_ns":"generate:795fc25b-5182-aad7-4783-e4fbe7274607","ls_provider":"openai","ls_model_name":"yandex-chat","ls_model_type":"chat","ls_temperature":0.0}]
+id: 1763464822825-0
+```
+
+### `POST / порт 2024`
+
+**Запрос Google A2A (RS__API__USE_GOOGLE_A2A=true):**
 ```json
 {
     "role": "user",
@@ -93,7 +124,7 @@
 }
 ```
 
-**Ответ A2A:**
+**Ответ Google A2A:**
 ```json
 {
     "metadata": {
@@ -125,6 +156,104 @@
         }
     ],
     "role": "agent"
+}
+```
+
+**Запрос python-a2a (RS__API__USE_GOOGLE_A2A=flase):**
+```json
+{
+    "role": "user",
+    "content": { "type": "text", "text": "Как снизить лаг Kafka consumer? Укажите источники." }
+}
+```
+
+**Ответ python-a2a:**
+```json
+{
+  "content": {
+    "text": "К сожалению, в предоставленных фрагментах нет информации о том, как снизить лаг Kafka consumer.",
+    "type": "text"
+  },
+  "message_id": "2fb6e237-159f-41d4-a30a-2fde717bc7f7",
+  "metadata": {
+    "created_at": "2025-11-18T11:12:05.039587",
+    "custom_fields": {
+      "citations": [
+        {
+          "page": null,
+          "snippet": " текст цитаты 1…",
+          "title": "имя_файла_1.html"
+        },
+        {
+          "page": null,
+          "snippet": " текст цитаты 2…",
+          "title": "имя_файла_2.html"
+        },
+        {
+          "page": 1,
+          "snippet": "текст цитаты 3",
+          "title": "имя файла 3.xlsx"
+        }
+      ]
+    }
+  },
+  "parent_message_id": "dc0bf2db-d553-43ba-815c-7ea047da3627",
+  "role": "agent"
+}
+```
+
+### `POST / порт 2024`/a2a/tasks/send
+
+**Запрос JSON-RPC style:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "1",
+  "params": {
+    "id": "task-id-optional",
+    "message": {
+      "role": "user",
+      "parts": [{ "type": "text", "text": "Как снизить лаг Kafka consumer? Укажите источники." }]
+    }
+  }
+}
+```
+
+**Ответ JSON-RPC style:**
+```json
+{
+  "id": "1",
+  "jsonrpc": "2.0",
+  "result": {
+    "artifacts": [
+      {
+        "parts": [
+          {
+            "text": "текст ответа...",
+            "type": "text"
+          }
+        ]
+      }
+    ],
+    "id": "task-id-optional",
+    "message": {
+      "metadata": {
+        "message_id": "4ac58bfb-67d1-4844-a7ef-8c2df0fc45e7"
+      },
+      "parts": [
+        {
+          "text": "Как снизить лаг Kafka consumer? Укажите источники.",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    },
+    "sessionId": "8fd1144f-ef05-4b24-8415-35b35c1a7dc8",
+    "status": {
+      "state": "completed",
+      "timestamp": "2025-11-18T11:28:01.832218"
+    }
+  }
 }
 ```
 

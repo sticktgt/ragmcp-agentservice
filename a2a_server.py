@@ -12,6 +12,7 @@ logger = get_logger()
 
 # Read API/citations toggles from config (kept from your version)
 CIT_CFG = (CONFIG.get("api", {}) or {}).get("citations", {}) or {}
+USE_GOOGLE_A2A = bool(CONFIG.get("api", {}).get("use_google_a2a", True))  # default ON
 APPEND_CITATIONS = bool(CIT_CFG.get("enabled", False))      # default OFF
 
 INVOKE_PORT = CONFIG.get("server", {}).get("port", 2024)
@@ -37,8 +38,8 @@ class MyAgentA2A(A2AServer):
                 ],
             )],
             capabilities={
-                "google_a2a_compatible": True,
-                "parts_array_format": True,
+                "google_a2a_compatible": USE_GOOGLE_A2A,
+                "parts_array_format": USE_GOOGLE_A2A,
                 "pushNotifications": False,
                 "stateTransitionHistory": False,
                 "streaming": False,   # we want non-stream
@@ -47,15 +48,23 @@ class MyAgentA2A(A2AServer):
 
         super().__init__(agent_card=agent_card)
 
-        # Force non-streaming on the advertised card (some versions flip it on)
-        try:
-            self.agent_card.capabilities["streaming"] = False
-        except Exception:
-            pass
-
-        # For libs that probe attributes or callables
         self._supports_streaming = False
         self.supports_streaming = False
+
+        # Tell the base server which wire format to use
+        if hasattr(self, "use_google_a2a_format") and callable(getattr(self, "use_google_a2a_format")):
+            # call the method, do not assign to it
+            self.use_google_a2a_format(USE_GOOGLE_A2A)
+
+        # Also set private flags some versions check directly
+        setattr(self, "_use_google_a2a", USE_GOOGLE_A2A)
+        setattr(self, "_parts_array_format", USE_GOOGLE_A2A)    
+        try:
+            self.agent_card.capabilities["streaming"] = False
+            self.agent_card.capabilities["google_a2a_compatible"] = USE_GOOGLE_A2A
+            self.agent_card.capabilities["parts_array_format"] = USE_GOOGLE_A2A
+        except Exception:
+            pass
 
     def supports_streaming(self) -> bool:
         return False
@@ -141,4 +150,4 @@ if __name__ == "__main__":
     a2a_host = CONFIG.get("server", {}).get("a2a_host", "0.0.0.0")
     a2a_port = CONFIG.get("server", {}).get("a2a_port", 5050)
     logger.info(f"Starting A2A server on {a2a_host}:{a2a_port}")
-    run_server(MyAgentA2A(), host=a2a_host, port=a2a_port, debug=True)
+    run_server(MyAgentA2A(), host=a2a_host, port=a2a_port, debug=False)

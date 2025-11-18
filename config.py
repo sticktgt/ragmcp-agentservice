@@ -43,26 +43,41 @@ def _cast_type(value: str, desired_type):
         return value
     
 def inject_dynamic_env_vars(config: dict, prefix="RS__") -> dict:
-    for key, val in os.environ.items():
-        if key.startswith(prefix):
-            path = key[len(prefix):].split("__")
-            cur = config
-            for i, part in enumerate(path[:-1]):
-                part_lower = part.lower()
-                # Check if a case-insensitive match already exists
-                matched_key = next((k for k in cur if k.lower() == part_lower), None)
-                if matched_key is None:
-                    matched_key = part_lower
-                if not isinstance(cur.get(matched_key), dict):
-                    cur[matched_key] = {}
-                cur = cur[matched_key]
+    for env_key, raw_val in os.environ.items():
+        if not env_key.startswith(prefix):
+            continue
 
-            last_key = path[-1].lower()
-            # Same logic for the final key
-            matched_last_key = next((k for k in cur if k.lower() == last_key), None)
-            if matched_last_key is None:
-                matched_last_key = last_key
-            cur[matched_last_key] = _guess_type(val)
+        parts = [p for p in env_key[len(prefix):].split("__") if p]
+        if not parts:
+            continue
+
+        cur = config
+        created_sections = []
+        # Walk/create intermediate sections, case-insensitive
+        for part in parts[:-1]:
+            part_l = part.lower()
+            matched_key = next((k for k in cur.keys() if k.lower() == part_l), None)
+            if matched_key is None:
+                matched_key = part_l
+                cur[matched_key] = {}
+                created_sections.append(matched_key)
+                #logger.debug(f"Created missing section '{matched_key}' for env {env_key}")
+            elif not isinstance(cur[matched_key], dict):
+                # Existing non-dict leaf; replace with dict to allow nesting
+                logger.warning(f"Converting '{matched_key}' to object to inject subkeys for env {env_key}")
+                cur[matched_key] = {}
+            cur = cur[matched_key]
+
+        last = parts[-1].lower()
+        existing_last = next((k for k in cur.keys() if k.lower() == last), None)
+        if existing_last is None:
+            cur[last] = _guess_type(raw_val)
+            # dot_path = ".".join([*created_sections, last]) if created_sections else last
+            logger.debug(f"Injected {env_key} from env")
+            # logger.info(f"Injected new config key from env: {env_key} -> path '{dot_path}'")
+        else:
+            # Do not overwrite here
+            pass
     return config
 
 
