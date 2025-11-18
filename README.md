@@ -21,18 +21,28 @@
 ## Архитектура (высокоуровнево)
 
 ```
+                 ┌───────────────────────────────────────────┐
+Клиенты (HTTP) → │ LangGraph API Server (порт 2024)          │
+                 │  ├─ /invoke        ← синхронный вызов      │
+                 │  ├─ /runs, /runs/stream, /messages         │
+                 │  └─ /docs (OpenAPI)                        │
+                 └──────────────┬─────────────────────────────┘
+                                │
+                                │ (HTTP к /invoke)
+                                ▼
+                 ┌───────────────────────────────────────────┐
+                 │ A2A сервер (порт 5050)                    │
+                 │  ├─ /.well-known/agent-card.json          │
+                 │  ├─ /          (POST message)             │
+                 │  ├─ /a2a/tasks/send (JSON-RPC)            │
+                 │  └─ /tasks/stream (SSE, опционально)      │
+                 └───────────────────────────────────────────┘
 
-Клиент ──(HTTP)──→ LangGraph API (+ кастомный FastAPI app)
-├─ /invoke ← синхронный вызов graph.ainvoke() → финальный JSON
-├─ /runs, /runs/stream, /messages (встроенные эндпоинты)
-└─ /docs (OpenAPI)
-
-Граф (StateGraph, LangGraph)
-├─ RouteNode → решает нужен ли поиск, режим поиска
-├─ SearchNode → если нужно - вызов MCP инструмента (rag.search)
-├─ GenerateNode→ сбор промпта (RU/EN) + контекста; вызов LLM
-└─ FinalizeNode→ формирует ответ и список citations (если включено)
-
+Граф (LangGraph: StateGraph)
+├─ RouteNode → решает нужен ли поиск / rerank
+├─ SearchNode → если нужно: вызов MCP (rag.search)
+├─ GenerateNode → собирает промпт + контекст; вызывает LLM
+└─ FinalizeNode → формирует {content, citations?}                 
 ```
 
 **Основные модули**
@@ -50,16 +60,16 @@
 
 ## API
 
-### `POST /invoke порт 2024`
+### `LangGraph (порт 2024)`
 
-**Запрос порт**
+**POST /invoke — синхронный**
 ```json
 {
     "question": "Как снизить лаг Kafka consumer? Укажите источники."
 }
 ```
 
-**Ответ (успех, с цитатами):**
+**Ответ (с цитатами):**
 ```json
 {
     "content": "Текст ответа от LLM",
@@ -73,16 +83,14 @@
     ]
 }
 ```
-**Ответ (успех, без цитат):**
+**Ответ (без цитат):**
 ```json
 {
     "content": "Текст ответа от LLM"
 }
 ```
 
-### `POST /runs/stream порт 2024`
-
-**Запрос LangGraph API:**
+**POST /runs/stream**
 ```bash
 curl -s --request POST \
   --url "http://localhost:2024/runs/stream" \
@@ -94,7 +102,7 @@ curl -s --request POST \
   }'
 ```
 
-**Ответ LangGraph API:**
+**Ответ:**
 ```json
 event: metadata
 data: {"run_id":"019a96b1-b161-712f-af32-2599443182b5","attempt":1}
@@ -109,9 +117,9 @@ data: [{"content":"","additional_kwargs":{},"response_metadata":{"finish_reason"
 id: 1763464822825-0
 ```
 
-### `POST / порт 2024`
+### `A2A (порт 5050)`
 
-**Запрос Google A2A (RS__API__USE_GOOGLE_A2A=true):**
+**Запрос Google A2A-совместимый (RS__API__USE_GOOGLE_A2A=true):**
 ```json
 {
     "role": "user",
@@ -124,7 +132,7 @@ id: 1763464822825-0
 }
 ```
 
-**Ответ Google A2A:**
+**Ответ:**
 ```json
 {
     "metadata": {
@@ -159,7 +167,7 @@ id: 1763464822825-0
 }
 ```
 
-**Запрос python-a2a (RS__API__USE_GOOGLE_A2A=flase):**
+**Запрос python-a2a формат (RS__API__USE_GOOGLE_A2A=flase):**
 ```json
 {
     "role": "user",
@@ -167,7 +175,7 @@ id: 1763464822825-0
 }
 ```
 
-**Ответ python-a2a:**
+**Ответ:**
 ```json
 {
   "content": {
@@ -202,9 +210,7 @@ id: 1763464822825-0
 }
 ```
 
-### `POST /a2a/tasks/send/ порт 2024`
-
-**Запрос JSON-RPC style:**
+**JSON-RPC пример:**
 ```json
 {
   "jsonrpc": "2.0",
@@ -219,7 +225,7 @@ id: 1763464822825-0
 }
 ```
 
-**Ответ JSON-RPC style:**
+**Ответ:**
 ```json
 {
   "id": "1",
@@ -300,25 +306,31 @@ langgraph dev
 
 Проверка:
 ```bash
-curl -s -X POST http://localhost:2024/invoke   -H "Content-Type: application/json"   -d '{"question":"Как снизить лаг Kafka consumer? Укажите источники."'
+curl -s -X POST http://localhost:2024/invoke \
+  -H "Content-Type: application/json" \
+  -d '{"question":"Как снизить лаг Kafka consumer? Укажите источники."}'
 ```
 
 ```bash
-curl -s --request POST \
-  --url "http://localhost:2024/runs/stream" \
-  --header 'Content-Type: application/json' \
-  --data '{
-    "assistant_id": "agent",
-    "input": { "question": "Как снизить лаг Kafka consumer? Укажите источники." },
-    "stream_mode": "messages-tuple"
-  }'
+curl -s http://localhost:5050/.well-known/agent-card.json | jq .
+curl -sS -X POST http://localhost:5050/ \
+  -H 'Content-Type: application/json' \
+  -d '{ "role":"user", "parts":[{"type":"text","text":"Тест"}] }'
 ```
 
 
 ### Docker (пример)
 ```bash
-docker run --rm -it -p 2024:2024 --add-host=host.docker.internal:host-gateway -e "RS__LLM__LITELLM__API_BASE=http://host.docker.internal:4000/v1" -e "RS__LLM__LITELLM__API_KEY=****************" -e "RS__LLM__LITELLM__FOLDER_ID=****************" -e "RS__MCP__SERVERS__RAG__URL=http://host.docker.internal:8080/mcp" -e "RS__API__CITATIONS__ENABLED=false" agentservice:latest
-```
+docker run --rm -it \
+  -p 2024:2024 -p 5050:5050 \
+  --add-host=host.docker.internal:host-gateway \
+  -e RS__LLM__LITELLM__API_BASE=http://host.docker.internal:4000/v1 \
+  -e RS__LLM__LITELLM__API_KEY=************************ \
+  -e RS__LLM__LITELLM__FOLDER_ID=************************ \
+  -e RS__MCP__SERVERS__RAG__URL=http://host.docker.internal:8080/mcp \
+  -e RS__API__CITATIONS__ENABLED=true \
+  -e RS__API__USE_GOOGLE_A2A=true \
+  agentservice:latest
 ---
 
 ## Дополнительно
@@ -378,5 +390,5 @@ curl -s http://localhost:5050/.well-known/agent-card.json | jq .
 ## TODO
 
 Добавить логирование в LangGraph
-  
+
     
